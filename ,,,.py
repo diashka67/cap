@@ -1,16 +1,15 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from PIL import Image, ImageEnhance
+from selenium.webdriver.chrome.options import Options
 import time
 import os
 
-# папка для картинок
 TEMP_DIR = "captcha_temp"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
 class Photo:
-    """Делает капчу почётче"""
 
     def bright(self):
         img = Image.open(TEMP_DIR + "/secpic4.png").convert("RGB")
@@ -21,10 +20,10 @@ class Photo:
 
 
 class Captcha:
-    """Читает текст с картинки через сайт"""
 
     def get_text(self):
-        driver = webdriver.Chrome()
+        proxy = ChangeCountry()
+        driver = webdriver.Chrome(options=proxy.get_proxy())
         driver.get("https://www.prepostseo.com/ru/image-to-text")
         time.sleep(3)
 
@@ -41,25 +40,22 @@ class Captcha:
 
 
 class Site:
-    """Заходит на сайт"""
 
     def __init__(self, login, password):
         self.login = login
         self.password = password
-        self.driver = webdriver.Chrome()
+        proxy = ChangeCountry()
+        self.driver = webdriver.Chrome(options=proxy.get_proxy())
 
     def start(self):
-        self.driver.get("https://issaold.beltelecom.by/main.html")
+        self.driver.get("https://whatmyuseragent.com/")
 
-        # скриншот капчи
         self.driver.find_element(By.XPATH, '//*[@id="capcher"]').screenshot(TEMP_DIR + "/secpic4.png")
 
-        # обработка и распознавание
         Photo().bright()
         text = Captcha().get_text()
         print("Капча:", text)
 
-        # вводим данные
         field = self.driver.find_element(By.XPATH, '//*[@id="cap_field"]')
         field.clear()
         field.send_keys(text)
@@ -68,15 +64,30 @@ class Site:
         self.driver.find_element(By.XPATH, '//*[@id="wrapper"]/div[2]/div[2]/div[3]/form/div/div[2]/input').send_keys(self.password)
         self.driver.find_element(By.XPATH, '//*[@id="wrapper"]/div[2]/div[2]/div[3]/form/div/div[4]/input').click()
 
-        # удаляем лишний файл
         if os.path.exists(TEMP_DIR + "/result.png"):
             os.remove(TEMP_DIR + "/result.png")
 
     def close(self):
-        input("Нажми Enter, чтобы закрыть...")
+        time.sleep(100)
         self.driver.quit()
 
 
-site = Site("unkown5325", "parol12345")
-site.start()
-site.close()
+class ChangeCountry:
+    def get_proxy(self):
+        options = Options()
+        options.add_argument("--user-agent=Godzilla/5.0 (Windows NT 666.0; Win864; x864) AppleWebKit/537.36 (KHTML, like Gecko) Shrone/120.0.0.0 Safari/537.36")
+        options.add_argument("--proxy-server=http://193.181.35.205:8118")
+        return options
+
+if __name__ == '__main__':
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+
+    options = Options()
+
+    options.add_argument(f"--proxy-server='221.221.150.139:8888'")
+
+    driver = webdriver.Chrome(options=options)
+    driver.get('https://whatmyuseragent.com/')
+    time.sleep(10)
+    driver.quit()
