@@ -2,7 +2,6 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import requests
 from PIL import Image, ImageEnhance
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -11,69 +10,87 @@ from selenium.webdriver.common.by import By
 TEMP_DIR = "captcha_temp"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-PROXY_LISTS = [
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-]
-
 SITE_URL = "https://issaold.beltelecom.by/main.html"
+PROXY_SOURCE = "https://advanced.name/freeproxy/6ad1dfbbc360d?type=http?type=https"
+PROXY_FILE = "proxy_list.txt"
+
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+TEST_COUNT = 10      # сколько прокси из списка проверять
+CHECK_WORKERS = 3    # сколько Chrome одновременно (каждый - отдельный браузер)
 
 PROXY = None
 
 
+def make_driver(proxy=None, headless=False):
+    options = Options()
+    options.add_argument("--user-agent=" + USER_AGENT)
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
+    if headless:
+        options.add_argument("--headless=new")
+    if proxy:
+        options.add_argument("--proxy-server=http://" + proxy)
+    return webdriver.Chrome(options=options)
 
-def download_proxies():
+
+# ---------- прокси (аналог get_proxy.py, но на Chrome) ----------
+
+def get_proxies():
+    """Берёт список ip:port со страницы advanced.name."""
+    driver = make_driver(headless=True)
     result = []
-    for url in PROXY_LISTS:
-        try:
-            text = requests.get(url, timeout=10).text
-            result += text.split()        
-        except Exception as e:
-            print("Не удалось скачать", url, e)
-    return result[:500]                    
+    try:
+        driver.get(PROXY_SOURCE)
+        text = driver.find_element(By.XPATH, "/html/body/pre").text
+        for line in text.strip().split("\n"):
+            line = line.strip().strip("'\",[]() ")
+            if line and ":" in line:
+                result.append(line)
+    except Exception as e:
+        print("Не удалось получить список прокси:", e)
+    finally:
+        driver.quit()
+    return result
 
 
 def check_proxy(proxy):
+    """Открывает сайт через прокси в headless Chrome. Рабочий -> proxy, иначе None."""
+    driver = None
     try:
-        answer = requests.get(
-            SITE_URL,
-            proxies={"http": "http://" + proxy, "https": "http://" + proxy},
-            timeout=5,
-            verify=False,
-        )
-        if answer.status_code == 200:
-            return proxy
+        driver = make_driver(proxy, headless=True)
+        driver.set_page_load_timeout(20)
+        driver.get(SITE_URL)
+        driver.find_element(By.XPATH, '//*[@id="capcher"]')  # капча есть -> сайт реально открылся
+        print("Works:", proxy)
+        return proxy
     except Exception:
-        pass
-    return None
+        print("Not works:", proxy)
+        return None
+    finally:
+        if driver:
+            driver.quit()
 
 
 def find_proxy():
-    proxies = download_proxies()
-    print("Скачано прокси:", len(proxies), "- проверяю...")
+    proxies = get_proxies()[:TEST_COUNT]
+    print("Получено прокси для проверки:", len(proxies))
 
-    with ThreadPoolExecutor(max_workers=50) as pool:
-        for result in pool.map(check_proxy, proxies):
-            if result:
-                print("Рабочий прокси:", result)
-                return result
+    with ThreadPoolExecutor(max_workers=CHECK_WORKERS) as pool:
+        working = [p for p in pool.map(check_proxy, proxies) if p]
 
+    with open(PROXY_FILE, "w") as f:
+        f.write("\n".join(working))
+
+    if working:
+        print("Рабочих прокси:", len(working), "- беру", working[0])
+        return working[0]
     print("Рабочих прокси нет, работаю без прокси")
     return None
 
 
-
-def make_driver():
-    options = Options()
-    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-gpu")
-    if PROXY:
-        options.add_argument("--proxy-server=http://" + PROXY)
-    return webdriver.Chrome(options=options)
-
-
+# ---------- капча ----------
 
 class Photo:
 
@@ -88,7 +105,7 @@ class Photo:
 class Captcha:
 
     def get_text(self):
-        driver = make_driver()
+        driver = make_driver()  # без прокси
 
         driver.get("https://www.prepostseo.com/ru/image-to-text")
         time.sleep(3)
@@ -110,7 +127,7 @@ class Site:
     def __init__(self, login, password):
         self.login = login
         self.password = password
-        self.driver = make_driver()
+        self.driver = make_driver(PROXY)
 
     def start(self):
         self.driver.get(SITE_URL)
@@ -137,9 +154,8 @@ class Site:
         self.driver.quit()
 
 
-
 if __name__ == "__main__":
-    PROXY = find_proxy()                      
-    site = Site("ВАШ_ЛОГИН", "ВАШ_ПАРОЛЬ")   
+    PROXY = find_proxy()
+    site = Site("ВАШ_ЛОГИН", "ВАШ_ПАРОЛЬ")
     site.start()
     site.close()
